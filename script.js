@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+// Verify OrbitControls import
+if (!OrbitControls) {
+    console.error('OrbitControls failed to load. Check CDN or import path.');
+}
+
 // Scene setup
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -35,21 +40,26 @@ player.position.y = 0.5;
 scene.add(player);
 
 // Set up OrbitControls for third-person camera
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.copy(player.position);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05;
+let controls;
+try {
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(player.position);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
 
-// Configure mouse buttons: Right-click to rotate, wheel to zoom
-controls.mouseButtons = {
-    LEFT: null,
-    MIDDLE: null,
-    RIGHT: THREE.MOUSE.ROTATE
-};
-controls.enableZoom = true; // Wheel controls distance
-controls.zoomSpeed = 1.0;
-controls.minDistance = 2; // Minimum camera distance
-controls.maxDistance = 15; // Maximum camera distance
+    // Configure mouse buttons: Right-click to rotate, wheel to zoom
+    controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: null,
+        RIGHT: THREE.MOUSE.ROTATE
+    };
+    controls.enableZoom = true;
+    controls.zoomSpeed = 1.0;
+    controls.minDistance = 2;
+    controls.maxDistance = 15;
+} catch (e) {
+    console.error('Failed to initialize OrbitControls:', e);
+}
 
 // Initial camera position (behind player)
 camera.position.set(0, 5, 10);
@@ -76,33 +86,35 @@ window.addEventListener('keyup', (e) => {
 function animate() {
     requestAnimationFrame(animate);
 
-    // Calculate camera direction (projected on XZ plane for movement)
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    cameraDirection.y = 0; // Ignore vertical component
-    cameraDirection.normalize();
+    if (controls) {
+        // Calculate camera direction (projected on XZ plane for movement)
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0;
+        cameraDirection.normalize();
 
-    // Calculate right vector (perpendicular to camera direction)
-    const rightVector = new THREE.Vector3();
-    rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
+        // Calculate right vector (perpendicular to camera direction)
+        const rightVector = new THREE.Vector3();
+        rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // Player movement relative to camera direction
-    const speed = 0.1;
-    const moveVector = new THREE.Vector3(0, 0, 0);
-    if (keys.w) moveVector.add(cameraDirection);
-    if (keys.s) moveVector.sub(cameraDirection);
-    if (keys.a) moveVector.sub(rightVector);
-    if (keys.d) moveVector.add(rightVector);
+        // Player movement relative to camera direction
+        const speed = 0.1;
+        const moveVector = new THREE.Vector3(0, 0, 0);
+        if (keys.w) moveVector.add(cameraDirection);
+        if (keys.s) moveVector.sub(cameraDirection);
+        if (keys.a) moveVector.sub(rightVector);
+        if (keys.d) moveVector.add(rightVector);
 
-    // Apply movement if any key is pressed
-    if (moveVector.lengthSq() > 0) {
-        moveVector.normalize().multiplyScalar(speed);
-        player.position.add(moveVector);
+        // Apply movement if any key is pressed
+        if (moveVector.lengthSq() > 0) {
+            moveVector.normalize().multiplyScalar(speed);
+            player.position.add(moveVector);
+        }
+
+        // Update camera to follow player
+        controls.target.copy(player.position);
+        controls.update();
     }
-
-    // Update camera to follow player
-    controls.target.copy(player.position);
-    controls.update();
 
     renderer.render(scene, camera);
 }

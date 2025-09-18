@@ -16,39 +16,43 @@ directionalLight.position.set(5, 5, 5);
 scene.add(directionalLight);
 
 // Create floor (a circle on the ground)
-const floorGeometry = new THREE.CircleGeometry(20, 32); // Radius 20, 32 segments
+const floorGeometry = new THREE.CircleGeometry(20, 32);
 const floorMaterial = new THREE.MeshBasicMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide });
 const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-floor.rotation.x = -Math.PI / 2; // Lay flat on XZ plane
+floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// Add grid texture to floor for better visibility (optional)
+// Add grid texture to floor
 const gridTexture = new THREE.GridHelper(40, 40, 0x000000, 0x000000);
-gridTexture.position.y = 0.01; // Slightly above floor to avoid z-fighting
+gridTexture.position.y = 0.01;
 scene.add(gridTexture);
 
 // Create player (a red box)
 const playerGeometry = new THREE.BoxGeometry(1, 1, 1);
 const playerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 const player = new THREE.Mesh(playerGeometry, playerMaterial);
-player.position.y = 0.5; // Above floor
+player.position.y = 0.5;
 scene.add(player);
 
-// Set up third-person camera with OrbitControls
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.copy(player.position); // Center on player
-controls.enableDamping = true; // Smooth movement
+// Set up OrbitControls for third-person camera
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.copy(player.position);
+controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
-// Configure mouse buttons: Right-click for orbit (rotate), disable others
+// Configure mouse buttons: Right-click to rotate, wheel to zoom
 controls.mouseButtons = {
-    LEFT: null,    // Disable left-click
-    MIDDLE: THREE.MOUSE.DOLLY, // Zoom with middle
-    RIGHT: THREE.MOUSE.ROTATE // Rotate with right-click
+    LEFT: null,
+    MIDDLE: null,
+    RIGHT: THREE.MOUSE.ROTATE
 };
+controls.enableZoom = true; // Wheel controls distance
+controls.zoomSpeed = 1.0;
+controls.minDistance = 2; // Minimum camera distance
+controls.maxDistance = 15; // Maximum camera distance
 
 // Initial camera position (behind player)
-camera.position.set(0, 5, 10); // Elevated and back for third-person view
+camera.position.set(0, 5, 10);
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -72,14 +76,31 @@ window.addEventListener('keyup', (e) => {
 function animate() {
     requestAnimationFrame(animate);
 
-    // Player movement (simple velocity, adjust speed as needed)
-    const speed = 0.1;
-    if (keys.w) player.position.z -= speed;
-    if (keys.s) player.position.z += speed;
-    if (keys.a) player.position.x -= speed;
-    if (keys.d) player.position.x += speed;
+    // Calculate camera direction (projected on XZ plane for movement)
+    const cameraDirection = new THREE.Vector3();
+    camera.getWorldDirection(cameraDirection);
+    cameraDirection.y = 0; // Ignore vertical component
+    cameraDirection.normalize();
 
-    // Update camera target to follow player
+    // Calculate right vector (perpendicular to camera direction)
+    const rightVector = new THREE.Vector3();
+    rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
+
+    // Player movement relative to camera direction
+    const speed = 0.1;
+    const moveVector = new THREE.Vector3(0, 0, 0);
+    if (keys.w) moveVector.add(cameraDirection);
+    if (keys.s) moveVector.sub(cameraDirection);
+    if (keys.a) moveVector.sub(rightVector);
+    if (keys.d) moveVector.add(rightVector);
+
+    // Apply movement if any key is pressed
+    if (moveVector.lengthSq() > 0) {
+        moveVector.normalize().multiplyScalar(speed);
+        player.position.add(moveVector);
+    }
+
+    // Update camera to follow player
     controls.target.copy(player.position);
     controls.update();
 

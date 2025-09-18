@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>3d Demo</title>
+    <title>three.js webgl - animation - walk</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <link type="text/css" rel="stylesheet" href="main.css">
@@ -13,10 +13,6 @@
 </head>
 <body>
     <div id="container"></div>
-    <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - Simple Walking Demo<br/>
-        Use W,A,S,D to move, right-click drag to rotate camera, mouse wheel to zoom
-    </div>
 
     <script type="importmap">
         {
@@ -38,8 +34,12 @@
         const minDistance = 2;
         const maxDistance = 15;
         const maxPolarAngle = Math.PI / 2 - 0.01;
-        const moveSpeed = 0.1;
         const keys = { w: false, a: false, s: false, d: false };
+
+        const settings = {
+            moveSpeed: 0.1,
+            circleRadius: 20 // Configurable circle size
+        };
 
         init();
         animate();
@@ -77,16 +77,16 @@
             scene.add(dirLight);
             scene.add(dirLight.target);
 
-            // Floor (circular with grid)
-            const floorGeometry = new THREE.CircleGeometry(20, 32);
+            // Floor (circular with configurable radius)
+            const floorGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
             const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide });
             floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Circular grid on floor
-            const gridTexture = new THREE.GridHelper(40, 40, 0x000000, 0x000000);
+            // Circular grid on floor (scaled to match circle size)
+            const gridTexture = new THREE.GridHelper(settings.circleRadius * 2, 40, 0x000000, 0x000000);
             gridTexture.position.y = 0.01;
             scene.add(gridTexture);
 
@@ -98,11 +98,11 @@
             player.castShadow = true;
             scene.add(player);
 
-            // OrbitControls for right-click rotation
+            // OrbitControls for right-click rotation (no smoothing)
             controls = new OrbitControls(camera, renderer.domElement);
             controls.target.copy(player.position);
-            controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
+            controls.enableDamping = false;
+            controls.dampingFactor = 0;
             controls.mouseButtons = {
                 LEFT: null,
                 MIDDLE: null,
@@ -120,6 +120,16 @@
 
             // Initial camera position
             updateCameraPosition();
+        }
+
+        function restrictPlayerToCircle() {
+            // Clamp player position to stay within the circular boundary
+            const distance = Math.sqrt(player.position.x * player.position.x + player.position.z * player.position.z);
+            if (distance > settings.circleRadius - 0.5) { // Account for player radius (0.5)
+                const scale = (settings.circleRadius - 0.5) / distance;
+                player.position.x *= scale;
+                player.position.z *= scale;
+            }
         }
 
         function updateCameraPosition() {
@@ -203,8 +213,9 @@
             if (keys.d) moveVector.add(rightVector);
 
             if (moveVector.lengthSq() > 0) {
-                moveVector.normalize().multiplyScalar(moveSpeed);
+                moveVector.normalize().multiplyScalar(settings.moveSpeed);
                 player.position.add(moveVector);
+                restrictPlayerToCircle(); // Restrict player to circle after movement
                 updateCameraPosition();
             }
 

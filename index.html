@@ -35,11 +35,22 @@
         let cameraDistance = 5;
         let azimuthalAngle = Math.PI / 4;
         let polarAngle = Math.PI / 4;
+        let prevAzimuthalAngle = Math.PI / 4; // Initialize to match initial azimuthalAngle
+        let prevPolarAngle = Math.PI / 4; // Initialize to match initial polarAngle
         let minDistance = 2;
         let maxDistance = 15;
         const maxPolarAngle = Math.PI / 2 - 0.01;
-        const keys = { w: false, a: false, s: false, d: false };
+        const keys = { w: false, a: false, s: false, d: false, '1': false };
         let uiPanel, toggleBtn;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        let targetPosition = null;
+        let currentSpeed = 0.1;
+        let isSkillMode = false;
+        let isSkillMoving = false;
+        let skillSpeed = 0.3; // Faster skill speed
+        let skillCircle;
+        let skillRadius = 5; // Skill area radius
 
         const defaults = {
             moveSpeed: 0.1,
@@ -126,6 +137,15 @@
             player.position.y = 0.5;
             player.castShadow = true;
             scene.add(player);
+
+            // Skill circle visual
+            const skillGeometry = new THREE.CircleGeometry(skillRadius, 32);
+            const skillMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+            skillCircle = new THREE.Mesh(skillGeometry, skillMaterial);
+            skillCircle.rotation.x = -Math.PI / 2;
+            skillCircle.position.y = 0.01;
+            skillCircle.visible = false;
+            scene.add(skillCircle);
 
             // OrbitControls for right-click rotation (no smoothing)
             controls = new OrbitControls(camera, renderer.domElement);
@@ -295,7 +315,7 @@
             resetBtn.style.backgroundColor = '#f44336';
             resetBtn.style.border = 'none';
             resetBtn.style.color = '#fff';
-            saveBtn.style.padding = '5px';
+            resetBtn.style.padding = '5px';
             resetBtn.style.cursor = 'pointer';
             resetBtn.style.borderRadius = '0';
             resetBtn.onclick = () => {
@@ -340,13 +360,68 @@
             window.addEventListener('wheel', onWheel);
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
+            window.addEventListener('mousedown', onMouseDown);
 
             // Initial camera position
             updateCameraPosition();
         }
 
+        function onMouseDown(event) {
+            if (event.button !== 0) return; // Only left click
+            if (event.target.closest('#ui-panel')) return; // Ignore clicks on UI panel
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(floor);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                const distFromCenter = Math.sqrt(point.x ** 2 + point.z ** 2);
+
+                if (distFromCenter > settings.circleRadius - 0.5) return; // Outside main circle
+
+                if (isSkillMode) {
+                    // Check if click is within skill area
+                    const distFromPlayer = Math.sqrt(
+                        (point.x - player.position.x) ** 2 + 
+                        (point.z - player.position.z) ** 2
+                    );
+                    if (distFromPlayer <= skillRadius) {
+                        targetPosition = point.clone();
+                        targetPosition.y = 0.5;
+                        currentSpeed = skillSpeed;
+                        isSkillMoving = true;
+                        isSkillMode = false;
+                        skillCircle.visible = false;
+                    }
+                } else if (!isSkillMoving) {
+                    // Normal click move
+                    targetPosition = point.clone();
+                    targetPosition.y = 0.5;
+                    currentSpeed = settings.moveSpeed;
+                }
+            }
+        }
+
+        function onKeyDown(event) {
+            const key = event.key.toLowerCase();
+            if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
+            if (key === '1' && !keys['1']) {
+                keys['1'] = true;
+                isSkillMode = !isSkillMode;
+                skillCircle.visible = isSkillMode;
+            }
+        }
+
+        function onKeyUp(event) {
+            const key = event.key.toLowerCase();
+            if (['w', 'a', 's', 'd'].includes(key)) keys[key] = false;
+            if (key === '1') keys['1'] = false;
+        }
+
         function restrictPlayerToCircle() {
-            // Clamp player position to stay within the circular boundary
             const distance = Math.sqrt(player.position.x * player.position.x + player.position.z * player.position.z);
             if (distance > settings.circleRadius - 0.5) {
                 const scale = (settings.circleRadius - 0.5) / distance;
@@ -397,24 +472,55 @@
             updateCameraPosition();
         }
 
-        function onKeyDown(event) {
-            const key = event.key.toLowerCase();
-            if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
-        }
-
-        function onKeyUp(event) {
-            const key = event.key.toLowerCase();
-            if (['w', 'a', 's', 'd'].includes(key)) keys[key] = false;
-        }
-
         function animate() {
             requestAnimationFrame(animate);
 
-            // Store previous angles
-            const prevAzimuthalAngle = azimuthalAngle;
-            const prevPolarAngle = polarAngle;
+            // Update skill circle position if active
+            if (isSkillMode) {
+                skillCircle.position.x = player.position.x;
+                skillCircle.position.z = player.position.z;
+            }
 
-            // Update angles from OrbitControls
+            // Handle target movement (click-based or skill-based)
+            if (targetPosition) {
+                const direction = targetPosition.clone().sub(player.position).normalize();
+                const step = direction.clone().multiplyScalar(currentSpeed);
+                if (step.length() >= player.position.distanceTo(targetPosition)) {
+                    player.position.copy(targetPosition);
+                    targetPosition = null;
+                    if (isSkillMoving) {
+                        isSkillMoving = false;
+                    }
+                } else {
+                    player.position.add(step);
+                }
+                restrictPlayerToCircle();
+                updateCameraPosition();
+            } else if (!isSkillMode && !isSkillMoving) {
+                // WASD movement only if not targeting, not in skill mode, not skill moving
+                const cameraDirection = new THREE.Vector3();
+                camera.getWorldDirection(cameraDirection);
+                cameraDirection.y = 0;
+                cameraDirection.normalize();
+
+                const rightVector = new THREE.Vector3();
+                rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
+
+                const moveVector = new THREE.Vector3(0, 0, 0);
+                if (keys.w) moveVector.add(cameraDirection);
+                if (keys.s) moveVector.sub(cameraDirection);
+                if (keys.a) moveVector.sub(rightVector);
+                if (keys.d) moveVector.add(rightVector);
+
+                if (moveVector.lengthSq() > 0) {
+                    moveVector.normalize().multiplyScalar(settings.moveSpeed);
+                    player.position.add(moveVector);
+                    restrictPlayerToCircle();
+                    updateCameraPosition();
+                }
+            }
+
+            // Update camera rotation from OrbitControls (runs independently)
             controls.update();
             const deltaX = camera.position.x - player.position.x;
             const deltaZ = camera.position.z - player.position.z;
@@ -423,33 +529,15 @@
             azimuthalAngle = Math.atan2(deltaZ, deltaX);
             polarAngle = Math.atan2(horizontalDistance, deltaY);
 
-            // Update camera position only if angles changed significantly
+            // Update camera position if angles changed
             if (Math.abs(azimuthalAngle - prevAzimuthalAngle) > 0.0001 ||
                 Math.abs(polarAngle - prevPolarAngle) > 0.0001) {
                 updateCameraPosition();
             }
 
-            // Player movement
-            const cameraDirection = new THREE.Vector3();
-            camera.getWorldDirection(cameraDirection);
-            cameraDirection.y = 0;
-            cameraDirection.normalize();
-
-            const rightVector = new THREE.Vector3();
-            rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
-
-            const moveVector = new THREE.Vector3(0, 0, 0);
-            if (keys.w) moveVector.add(cameraDirection);
-            if (keys.s) moveVector.sub(cameraDirection);
-            if (keys.a) moveVector.sub(rightVector);
-            if (keys.d) moveVector.add(rightVector);
-
-            if (moveVector.lengthSq() > 0) {
-                moveVector.normalize().multiplyScalar(settings.moveSpeed);
-                player.position.add(moveVector);
-                restrictPlayerToCircle();
-                updateCameraPosition();
-            }
+            // Update previous angles for next frame
+            prevAzimuthalAngle = azimuthalAngle;
+            prevPolarAngle = polarAngle;
 
             renderer.render(scene, camera);
         }

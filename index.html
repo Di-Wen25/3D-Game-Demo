@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js webgl - animation - walk</title>
+    <title>3D Demo</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <link type="text/css" rel="stylesheet" href="main.css">
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
         a {
             color: #f00;
+        }
+        #ui-panel, #ui-panel label, #ui-panel span, #ui-panel button {
+            font-family: 'Noto Sans TC', Arial, sans-serif;
         }
     </style>
 </head>
@@ -31,14 +35,22 @@
         let cameraDistance = 5;
         let azimuthalAngle = Math.PI / 4;
         let polarAngle = Math.PI / 4;
-        const minDistance = 2;
-        const maxDistance = 15;
+        let minDistance = 2;
+        let maxDistance = 15;
         const maxPolarAngle = Math.PI / 2 - 0.01;
         const keys = { w: false, a: false, s: false, d: false };
+        let uiPanel, toggleBtn;
+
+        const defaults = {
+            moveSpeed: 0.1,
+            minDistance: 2,
+            maxDistance: 15,
+            cameraDistance: 5
+        };
 
         const settings = {
-            moveSpeed: 0.1,
-            circleRadius: 20 // Configurable circle size
+            moveSpeed: defaults.moveSpeed,
+            circleRadius: 20 // Not changeable via UI
         };
 
         init();
@@ -46,6 +58,23 @@
 
         function init() {
             const container = document.getElementById('container');
+            container.style.position = 'absolute';
+            container.style.top = '0';
+            container.style.left = '0';
+            container.style.width = '100%';
+            container.style.height = '100%';
+            document.body.style.margin = '0';
+            document.body.style.overflow = 'hidden';
+
+            // Load settings from localStorage
+            const saved = localStorage.getItem('gameSettings');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                settings.moveSpeed = parsed.moveSpeed || defaults.moveSpeed;
+                minDistance = parsed.minDistance || defaults.minDistance;
+                maxDistance = parsed.maxDistance || defaults.maxDistance;
+                cameraDistance = parsed.cameraDistance || defaults.cameraDistance;
+            }
 
             // Scene setup
             scene = new THREE.Scene();
@@ -85,7 +114,7 @@
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Circular grid on floor (scaled to match circle size)
+            // Circular grid on floor
             const gridTexture = new THREE.GridHelper(settings.circleRadius * 2, 40, 0x000000, 0x000000);
             gridTexture.position.y = 0.01;
             scene.add(gridTexture);
@@ -112,6 +141,200 @@
             controls.enablePan = false;
             controls.maxPolarAngle = maxPolarAngle;
 
+            // UI Panel (dark theme, vertical layout, rectangular)
+            uiPanel = document.createElement('div');
+            uiPanel.id = 'ui-panel';
+            uiPanel.style.position = 'absolute';
+            uiPanel.style.top = '0';
+            uiPanel.style.left = '0';
+            uiPanel.style.width = '200px';
+            uiPanel.style.backgroundColor = '#333';
+            uiPanel.style.color = '#fff';
+            uiPanel.style.padding = '10px';
+            uiPanel.style.zIndex = '10';
+            uiPanel.style.overflowY = 'auto';
+            uiPanel.style.maxHeight = '100vh';
+            uiPanel.style.borderRadius = '0';
+            uiPanel.style.display = 'block';
+            document.body.appendChild(uiPanel);
+
+            // Prevent wheel events from propagating to camera zoom when over panel
+            uiPanel.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                // Browser handles scrolling if overflow
+            }, { passive: false });
+
+            // Toggle button (outside uiPanel for persistent visibility)
+            toggleBtn = document.createElement('button');
+            toggleBtn.textContent = 'Hide Settings';
+            toggleBtn.style.position = 'absolute';
+            toggleBtn.style.top = '10px';
+            toggleBtn.style.left = '10px';
+            toggleBtn.style.backgroundColor = '#555';
+            toggleBtn.style.border = 'none';
+            toggleBtn.style.color = '#fff';
+            toggleBtn.style.padding = '5px 10px';
+            toggleBtn.style.cursor = 'pointer';
+            toggleBtn.style.borderRadius = '0';
+            toggleBtn.style.zIndex = '11';
+            toggleBtn.onclick = () => {
+                uiPanel.style.display = uiPanel.style.display === 'none' ? 'block' : 'none';
+                toggleBtn.textContent = uiPanel.style.display === 'none' ? 'Show Settings' : 'Hide Settings';
+            };
+            document.body.appendChild(toggleBtn);
+
+            // Function to create slider section with value display
+            function createSlider(labelText, id, min, max, step, value, onChange) {
+                const div = document.createElement('div');
+                div.style.marginBottom = '15px';
+
+                const label = document.createElement('label');
+                label.textContent = labelText;
+                label.htmlFor = id;
+                label.style.display = 'block';
+                label.style.marginBottom = '5px';
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.id = id;
+                slider.min = min;
+                slider.max = max;
+                slider.step = step;
+                slider.value = value;
+                slider.style.width = '100%';
+                slider.oninput = (e) => {
+                    onChange(e);
+                    if (uiPanel.style.display !== 'none') {
+                        valueDisplay.textContent = parseFloat(e.target.value).toFixed(2);
+                    }
+                };
+
+                const valueDisplay = document.createElement('span');
+                valueDisplay.id = id + '-value';
+                valueDisplay.textContent = parseFloat(value).toFixed(2);
+                valueDisplay.style.marginLeft = '10px';
+
+                const sliderContainer = document.createElement('div');
+                sliderContainer.style.display = 'flex';
+                sliderContainer.style.alignItems = 'center';
+                sliderContainer.appendChild(slider);
+                sliderContainer.appendChild(valueDisplay);
+
+                div.appendChild(label);
+                div.appendChild(sliderContainer);
+                return div;
+            }
+
+            // Player Speed slider
+            uiPanel.appendChild(createSlider('Player Speed', 'player-speed', 0.01, 1, 0.01, settings.moveSpeed, (e) => {
+                settings.moveSpeed = parseFloat(e.target.value);
+            }));
+
+            // Min Camera Distance slider
+            uiPanel.appendChild(createSlider('Min Camera Distance', 'min-dist', 0.1, 10, 0.1, minDistance, (e) => {
+                minDistance = parseFloat(e.target.value);
+                const camSlider = document.getElementById('cam-dist');
+                camSlider.min = minDistance;
+                if (cameraDistance < minDistance) {
+                    cameraDistance = minDistance;
+                    camSlider.value = cameraDistance;
+                    if (uiPanel.style.display !== 'none') {
+                        document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                    }
+                    updateCameraPosition();
+                }
+            }));
+
+            // Max Camera Distance slider
+            uiPanel.appendChild(createSlider('Max Camera Distance', 'max-dist', 5, 50, 1, maxDistance, (e) => {
+                maxDistance = parseFloat(e.target.value);
+                const camSlider = document.getElementById('cam-dist');
+                camSlider.max = maxDistance;
+                if (cameraDistance > maxDistance) {
+                    cameraDistance = maxDistance;
+                    camSlider.value = cameraDistance;
+                    if (uiPanel.style.display !== 'none') {
+                        document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                    }
+                    updateCameraPosition();
+                }
+            }));
+
+            // Current Camera Distance slider
+            uiPanel.appendChild(createSlider('Camera Distance', 'cam-dist', minDistance, maxDistance, 0.1, cameraDistance, (e) => {
+                cameraDistance = parseFloat(e.target.value);
+                updateCameraPosition();
+            }));
+
+            // Save button
+            const saveBtn = document.createElement('button');
+            saveBtn.textContent = 'Save Settings';
+            saveBtn.style.width = '100%';
+            saveBtn.style.backgroundColor = '#4CAF50';
+            saveBtn.style.border = 'none';
+            saveBtn.style.color = '#fff';
+            saveBtn.style.padding = '5px';
+            saveBtn.style.marginBottom = '5px';
+            saveBtn.style.cursor = 'pointer';
+            saveBtn.style.borderRadius = '0';
+            saveBtn.onclick = () => {
+                const savedSettings = {
+                    moveSpeed: settings.moveSpeed,
+                    minDistance: minDistance,
+                    maxDistance: maxDistance,
+                    cameraDistance: cameraDistance
+                };
+                localStorage.setItem('gameSettings', JSON.stringify(savedSettings));
+            };
+            uiPanel.appendChild(saveBtn);
+
+            // Reset button
+            const resetBtn = document.createElement('button');
+            resetBtn.textContent = 'Reset Settings';
+            resetBtn.style.width = '100%';
+            resetBtn.style.backgroundColor = '#f44336';
+            resetBtn.style.border = 'none';
+            resetBtn.style.color = '#fff';
+            saveBtn.style.padding = '5px';
+            resetBtn.style.cursor = 'pointer';
+            resetBtn.style.borderRadius = '0';
+            resetBtn.onclick = () => {
+                // Load saved settings or fall back to defaults
+                const saved = localStorage.getItem('gameSettings');
+                let resetSettings = { ...defaults };
+                if (saved) {
+                    resetSettings = JSON.parse(saved);
+                }
+
+                settings.moveSpeed = resetSettings.moveSpeed || defaults.moveSpeed;
+                minDistance = resetSettings.minDistance || defaults.minDistance;
+                maxDistance = resetSettings.maxDistance || defaults.maxDistance;
+                cameraDistance = resetSettings.cameraDistance || defaults.cameraDistance;
+
+                // Update sliders and their value displays (only if panel is visible)
+                document.getElementById('player-speed').value = settings.moveSpeed;
+                if (uiPanel.style.display !== 'none') {
+                    document.getElementById('player-speed-value').textContent = settings.moveSpeed.toFixed(2);
+                }
+                document.getElementById('min-dist').value = minDistance;
+                if (uiPanel.style.display !== 'none') {
+                    document.getElementById('min-dist-value').textContent = minDistance.toFixed(2);
+                }
+                document.getElementById('max-dist').value = maxDistance;
+                if (uiPanel.style.display !== 'none') {
+                    document.getElementById('max-dist-value').textContent = maxDistance.toFixed(2);
+                }
+                document.getElementById('cam-dist').value = cameraDistance;
+                if (uiPanel.style.display !== 'none') {
+                    document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                }
+                document.getElementById('cam-dist').min = minDistance;
+                document.getElementById('cam-dist').max = maxDistance;
+
+                updateCameraPosition();
+            };
+            uiPanel.appendChild(resetBtn);
+
             // Event listeners
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('wheel', onWheel);
@@ -125,7 +348,7 @@
         function restrictPlayerToCircle() {
             // Clamp player position to stay within the circular boundary
             const distance = Math.sqrt(player.position.x * player.position.x + player.position.z * player.position.z);
-            if (distance > settings.circleRadius - 0.5) { // Account for player radius (0.5)
+            if (distance > settings.circleRadius - 0.5) {
                 const scale = (settings.circleRadius - 0.5) / distance;
                 player.position.x *= scale;
                 player.position.z *= scale;
@@ -160,8 +383,17 @@
         }
 
         function onWheel(e) {
+            // Only handle wheel if not over UI panel
+            if (e.target.closest('#ui-panel')) return;
             const delta = e.deltaY > 0 ? 0.2 : -0.2;
             cameraDistance = Math.max(minDistance, Math.min(maxDistance, cameraDistance + delta));
+            if (uiPanel.style.display !== 'none') {
+                const camSlider = document.getElementById('cam-dist');
+                if (camSlider) {
+                    camSlider.value = cameraDistance;
+                    document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                }
+            }
             updateCameraPosition();
         }
 
@@ -215,7 +447,7 @@
             if (moveVector.lengthSq() > 0) {
                 moveVector.normalize().multiplyScalar(settings.moveSpeed);
                 player.position.add(moveVector);
-                restrictPlayerToCircle(); // Restrict player to circle after movement
+                restrictPlayerToCircle();
                 updateCameraPosition();
             }
 

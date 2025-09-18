@@ -39,7 +39,14 @@ const player = new THREE.Mesh(playerGeometry, playerMaterial);
 player.position.y = 0.5;
 scene.add(player);
 
-// Set up OrbitControls for third-person camera
+// Camera offset parameters (spherical coordinates)
+let cameraDistance = 5; // Initial distance (5 meters)
+let azimuthalAngle = Math.PI / 4; // 45 degrees in radians
+let polarAngle = Math.PI / 4; // 45 degrees elevation for third-person view
+const minDistance = 2;
+const maxDistance = 15;
+
+// Set up OrbitControls for rotation and zoom
 let controls;
 try {
     controls = new OrbitControls(camera, renderer.domElement);
@@ -53,18 +60,42 @@ try {
         MIDDLE: null,
         RIGHT: THREE.MOUSE.ROTATE
     };
-    controls.enableZoom = true;
-    controls.zoomSpeed = 1.0;
-    controls.minDistance = 2;
-    controls.maxDistance = 15;
+    controls.enableZoom = false; // We'll handle zoom manually
+    controls.enablePan = false;
 } catch (e) {
     console.error('Failed to initialize OrbitControls:', e);
 }
 
-// Initial camera position (behind and above player)
-camera.position.set(0, 5, 10);
-// Calculate initial offset (camera position relative to player)
-const cameraOffset = new THREE.Vector3(0, 5, 10); // Relative to player (x:0, y:5, z:10)
+// Update camera position based on offset
+function updateCameraPosition() {
+    // Convert spherical coordinates to Cartesian
+    const sinPolar = Math.sin(polarAngle);
+    const cosPolar = Math.cos(polarAngle);
+    const sinAzimuth = Math.sin(azimuthalAngle);
+    const cosAzimuth = Math.cos(azimuthalAngle);
+    
+    const offset = new THREE.Vector3(
+        cameraDistance * sinPolar * cosAzimuth,
+        cameraDistance * cosPolar,
+        cameraDistance * sinPolar * sinAzimuth
+    );
+    
+    // Set camera position: player position + offset
+    camera.position.copy(player.position).add(offset);
+    
+    // Make camera look at player
+    camera.lookAt(player.position);
+}
+
+// Initial camera position
+updateCameraPosition();
+
+// Handle mouse wheel for distance
+window.addEventListener('wheel', (e) => {
+    const delta = e.deltaY > 0 ? 0.2 : -0.2; // Scroll up: increase, down: decrease
+    cameraDistance = Math.max(minDistance, Math.min(maxDistance, cameraDistance + delta));
+    updateCameraPosition();
+});
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -89,13 +120,26 @@ function animate() {
     requestAnimationFrame(animate);
 
     if (controls) {
-        // Calculate camera direction (projected on XZ plane for movement)
+        // Update azimuthal angle based on OrbitControls rotation
+        const oldPosition = camera.position.clone();
+        controls.update();
+        const newPosition = camera.position.clone();
+        
+        // Calculate change in azimuthal angle from camera movement
+        const deltaX = newPosition.x - player.position.x;
+        const deltaZ = newPosition.z - player.position.z;
+        azimuthalAngle = Math.atan2(deltaZ, deltaX);
+
+        // Update camera position to maintain offset
+        updateCameraPosition();
+
+        // Calculate camera direction for player movement (XZ plane)
         const cameraDirection = new THREE.Vector3();
         camera.getWorldDirection(cameraDirection);
         cameraDirection.y = 0;
         cameraDirection.normalize();
 
-        // Calculate right vector (perpendicular to camera direction)
+        // Calculate right vector
         const rightVector = new THREE.Vector3();
         rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
 
@@ -107,24 +151,14 @@ function animate() {
         if (keys.a) moveVector.sub(rightVector);
         if (keys.d) moveVector.add(rightVector);
 
-        // Apply movement if any key is pressed
+        // Apply movement
         if (moveVector.lengthSq() > 0) {
             moveVector.normalize().multiplyScalar(speed);
             player.position.add(moveVector);
         }
 
-        // Update camera position to maintain fixed offset
-        const rotatedOffset = cameraOffset.clone();
-        // Apply the camera's rotation (from OrbitControls) to the offset
-        const cameraQuaternion = new THREE.Quaternion();
-        camera.getWorldQuaternion(cameraQuaternion);
-        rotatedOffset.applyQuaternion(cameraQuaternion);
-        // Set camera position: player position + rotated offset
-        camera.position.copy(player.position).add(rotatedOffset);
-
-        // Update OrbitControls target to player position
+        // Update controls target
         controls.target.copy(player.position);
-        controls.update();
     }
 
     renderer.render(scene, camera);

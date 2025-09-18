@@ -45,8 +45,9 @@ let azimuthalAngle = Math.PI / 4; // 45 degrees
 let polarAngle = Math.PI / 4; // 45 degrees elevation
 const minDistance = 2;
 const maxDistance = 15;
+const maxPolarAngle = Math.PI / 2 - 0.01; // Slightly less than 90° to stay above player
 
-// Set up OrbitControls for rotation input only
+// Set up OrbitControls for rotation input
 let controls;
 try {
     controls = new OrbitControls(camera, renderer.domElement);
@@ -62,7 +63,6 @@ try {
     };
     controls.enableZoom = false; // Handle zoom manually
     controls.enablePan = false;
-    // Disable auto-rotation and position updates
     controls.autoRotate = false;
     controls.enableRotate = true;
 } catch (e) {
@@ -71,6 +71,9 @@ try {
 
 // Update camera position based on offset
 function updateCameraPosition() {
+    // Clamp polar angle to prevent camera going below player
+    polarAngle = Math.max(0, Math.min(maxPolarAngle, polarAngle));
+    
     // Convert spherical coordinates to Cartesian
     const sinPolar = Math.sin(polarAngle);
     const cosPolar = Math.cos(polarAngle);
@@ -123,16 +126,23 @@ function animate() {
     requestAnimationFrame(animate);
 
     if (controls) {
-        // Update azimuthal angle based on OrbitControls
+        // Store previous angles
         const prevAzimuthalAngle = azimuthalAngle;
+        const prevPolarAngle = polarAngle;
+
+        // Update angles based on OrbitControls
         controls.update();
-        // Calculate new azimuthal angle from controls
         const deltaX = camera.position.x - player.position.x;
         const deltaZ = camera.position.z - player.position.z;
+        const deltaY = camera.position.y - player.position.y;
+        const horizontalDistance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        
         azimuthalAngle = Math.atan2(deltaZ, deltaX);
+        polarAngle = Math.atan2(horizontalDistance, deltaY);
 
-        // Prevent spinning by only updating angle if changed significantly
-        if (Math.abs(azimuthalAngle - prevAzimuthalAngle) > 0.0001) {
+        // Update camera position only if angles changed significantly
+        if (Math.abs(azimuthalAngle - prevAzimuthalAngle) > 0.0001 || 
+            Math.abs(polarAngle - prevPolarAngle) > 0.0001) {
             updateCameraPosition();
         }
 
@@ -158,7 +168,6 @@ function animate() {
         if (moveVector.lengthSq() > 0) {
             moveVector.normalize().multiplyScalar(speed);
             player.position.add(moveVector);
-            // Update camera position instantly with player
             updateCameraPosition();
         }
 

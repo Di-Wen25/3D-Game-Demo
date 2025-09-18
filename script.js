@@ -61,8 +61,10 @@ try {
     console.error('Failed to initialize OrbitControls:', e);
 }
 
-// Initial camera position (behind player)
+// Initial camera position (behind and above player)
 camera.position.set(0, 5, 10);
+// Calculate initial offset (camera position relative to player)
+const cameraOffset = new THREE.Vector3(0, 5, 10); // Relative to player (x:0, y:5, z:10)
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -111,7 +113,16 @@ function animate() {
             player.position.add(moveVector);
         }
 
-        // Update camera to follow player
+        // Update camera position to maintain fixed offset
+        const rotatedOffset = cameraOffset.clone();
+        // Apply the camera's rotation (from OrbitControls) to the offset
+        const cameraQuaternion = new THREE.Quaternion();
+        camera.getWorldQuaternion(cameraQuaternion);
+        rotatedOffset.applyQuaternion(cameraQuaternion);
+        // Set camera position: player position + rotated offset
+        camera.position.copy(player.position).add(rotatedOffset);
+
+        // Update OrbitControls target to player position
         controls.target.copy(player.position);
         controls.update();
     }

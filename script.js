@@ -39,13 +39,14 @@ const player = new THREE.Mesh(playerGeometry, playerMaterial);
 player.position.y = 0.5;
 scene.add(player);
 
-// Camera offset parameters
-const baseOffset = new THREE.Vector3(2.5, 2.5, 2.5); // Initial offset (5m distance, ~45° angles)
-let distanceScale = 1.0; // Scale factor for mouse wheel zoom
-const minDistanceScale = 0.4; // 2m distance (0.4 * 5m)
-const maxDistanceScale = 3.0; // 15m distance (3.0 * 5m)
+// Camera offset parameters (spherical coordinates)
+let cameraDistance = 5; // Initial distance (5 meters)
+let azimuthalAngle = Math.PI / 4; // 45 degrees
+let polarAngle = Math.PI / 4; // 45 degrees elevation
+const minDistance = 2;
+const maxDistance = 15;
 
-// Set up OrbitControls for rotation
+// Set up OrbitControls for rotation input only
 let controls;
 try {
     controls = new OrbitControls(camera, renderer.domElement);
@@ -61,20 +62,29 @@ try {
     };
     controls.enableZoom = false; // Handle zoom manually
     controls.enablePan = false;
+    // Disable auto-rotation and position updates
+    controls.autoRotate = false;
+    controls.enableRotate = true;
 } catch (e) {
     console.error('Failed to initialize OrbitControls:', e);
 }
 
 // Update camera position based on offset
 function updateCameraPosition() {
-    // Apply rotation from OrbitControls to the offset
-    const rotatedOffset = baseOffset.clone().multiplyScalar(distanceScale);
-    const cameraQuaternion = new THREE.Quaternion();
-    camera.getWorldQuaternion(cameraQuaternion);
-    rotatedOffset.applyQuaternion(cameraQuaternion);
+    // Convert spherical coordinates to Cartesian
+    const sinPolar = Math.sin(polarAngle);
+    const cosPolar = Math.cos(polarAngle);
+    const sinAzimuth = Math.sin(azimuthalAngle);
+    const cosAzimuth = Math.cos(azimuthalAngle);
     
-    // Set camera position: player position + rotated offset
-    camera.position.copy(player.position).add(rotatedOffset);
+    const offset = new THREE.Vector3(
+        cameraDistance * sinPolar * cosAzimuth,
+        cameraDistance * cosPolar,
+        cameraDistance * sinPolar * sinAzimuth
+    );
+    
+    // Set camera position: player position + offset
+    camera.position.copy(player.position).add(offset);
     
     // Make camera look at player
     camera.lookAt(player.position);
@@ -85,8 +95,8 @@ updateCameraPosition();
 
 // Handle mouse wheel for distance
 window.addEventListener('wheel', (e) => {
-    const delta = e.deltaY > 0 ? 0.1 : -0.1; // Scroll up: increase, down: decrease
-    distanceScale = Math.max(minDistanceScale, Math.min(maxDistanceScale, distanceScale + delta));
+    const delta = e.deltaY > 0 ? 0.2 : -0.2; // Scroll up: increase, down: decrease
+    cameraDistance = Math.max(minDistance, Math.min(maxDistance, cameraDistance + delta));
     updateCameraPosition();
 });
 
@@ -113,6 +123,19 @@ function animate() {
     requestAnimationFrame(animate);
 
     if (controls) {
+        // Update azimuthal angle based on OrbitControls
+        const prevAzimuthalAngle = azimuthalAngle;
+        controls.update();
+        // Calculate new azimuthal angle from controls
+        const deltaX = camera.position.x - player.position.x;
+        const deltaZ = camera.position.z - player.position.z;
+        azimuthalAngle = Math.atan2(deltaZ, deltaX);
+
+        // Prevent spinning by only updating angle if changed significantly
+        if (Math.abs(azimuthalAngle - prevAzimuthalAngle) > 0.0001) {
+            updateCameraPosition();
+        }
+
         // Calculate camera direction for player movement (XZ plane)
         const cameraDirection = new THREE.Vector3();
         camera.getWorldDirection(cameraDirection);
@@ -135,14 +158,12 @@ function animate() {
         if (moveVector.lengthSq() > 0) {
             moveVector.normalize().multiplyScalar(speed);
             player.position.add(moveVector);
+            // Update camera position instantly with player
+            updateCameraPosition();
         }
-
-        // Update camera position instantly with player
-        updateCameraPosition();
 
         // Update controls target
         controls.target.copy(player.position);
-        controls.update();
     }
 
     renderer.render(scene, camera);

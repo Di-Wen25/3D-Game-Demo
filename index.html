@@ -7,20 +7,8 @@
     <link type="text/css" rel="stylesheet" href="main.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
-        a {
-            color: #f00;
-        }
         #ui-panel, #ui-panel label, #ui-panel span, #ui-panel button {
             font-family: 'Noto Sans TC', Arial, sans-serif;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            color: #fff;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 5px 10px;
-            z-index: 10;
         }
         .ui-section {
             margin-bottom: 20px;
@@ -37,6 +25,7 @@
 </head>
 <body>
     <div id="container"></div>
+
     <script type="importmap">
         {
             "imports": {
@@ -51,9 +40,10 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         let scene, renderer, camera, floor, playerGroup, orbitControls, clock, dirLight;
+        let northCylinder, eastCylinder, southCylinder, westCylinder;
         let cameraDistance = 10;
-        let cameraFov = 80;
-        let renderDistance = 100;
+        let cameraFov = 60;
+        let renderDistance = 200;
         const keys = { w: false, a: false, s: false, d: false, '1': false };
         let uiPanel, toggleBtn;
         let raycaster = new THREE.Raycaster();
@@ -61,23 +51,23 @@
         let targetPosition = null;
         let isSkillMode = false;
         let isSkillMoving = false;
-        let skillSpeed = 240;
+        let skillSpeed = 500;
         let skillCircle;
-        let skillRadius = 5;
+        let skillRadius = 30;
         let ease = new THREE.Vector3();
-        let position = new THREE.Vector3(0, 1, 0);
+        let position = new THREE.Vector3(0, 0.5, 0);
         let up = new THREE.Vector3(0, 1, 0);
         let rotate = new THREE.Quaternion();
-        let currentMoveSpeed = 80;
+        let currentMoveSpeed = 120;
 
         const defaults = {
-            moveSpeed: 80,
-            skillSpeed: 240,
-            skillRadius: 5,
+            moveSpeed: 120,
+            skillSpeed: 500,
+            skillRadius: 30,
             cameraDistance: 10,
-            cameraFov: 80,
+            cameraFov: 60,
             circleRadius: 40,
-            renderDistance: 100
+            renderDistance: 200
         };
 
         const settings = {
@@ -89,6 +79,53 @@
         init();
         animate();
 
+        function saveSettings() {
+            const savedSettings = {
+                moveSpeed: settings.moveSpeed,
+                skillSpeed: skillSpeed,
+                skillRadius: skillRadius,
+                cameraDistance: cameraDistance,
+                cameraFov: cameraFov,
+                circleRadius: settings.circleRadius,
+                renderDistance: renderDistance
+            };
+            localStorage.setItem('gameSettings', JSON.stringify(savedSettings));
+        }
+
+        function loadSettings() {
+            const saved = localStorage.getItem('gameSettings');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (typeof parsed !== 'object' || parsed === null) {
+                        throw new Error('Invalid settings format');
+                    }
+                    settings.moveSpeed = Math.max(80, Math.min(200, parsed.moveSpeed || defaults.moveSpeed));
+                    skillSpeed = Math.max(80, Math.min(400, parsed.skillSpeed || defaults.skillSpeed));
+                    skillRadius = Math.max(1, Math.min(40, parsed.skillRadius || defaults.skillRadius));
+                    cameraDistance = Math.max(10, Math.min(50, parsed.cameraDistance || defaults.cameraDistance));
+                    cameraFov = Math.max(30, Math.min(120, parsed.cameraFov || defaults.cameraFov));
+                    settings.circleRadius = Math.max(10, Math.min(100, parsed.circleRadius || defaults.circleRadius));
+                    renderDistance = Math.max(10, Math.min(500, parsed.renderDistance || defaults.renderDistance));
+                } catch (error) {
+                    console.warn('Invalid localStorage data, using defaults:', error);
+                    useDefaults();
+                }
+            } else {
+                useDefaults();
+            }
+        }
+
+        function useDefaults() {
+            settings.moveSpeed = defaults.moveSpeed;
+            skillSpeed = defaults.skillSpeed;
+            skillRadius = defaults.skillRadius;
+            cameraDistance = defaults.cameraDistance;
+            cameraFov = defaults.cameraFov;
+            settings.circleRadius = defaults.circleRadius;
+            renderDistance = defaults.renderDistance;
+        }
+
         function init() {
             const container = document.getElementById('container');
             container.style.position = 'absolute';
@@ -99,18 +136,8 @@
             document.body.style.margin = '0';
             document.body.style.overflow = 'hidden';
 
-            // Load settings from localStorage
-            const saved = localStorage.getItem('gameSettings');
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                settings.moveSpeed = parsed.moveSpeed || defaults.moveSpeed;
-                skillSpeed = parsed.skillSpeed || defaults.skillSpeed;
-                skillRadius = parsed.skillRadius || defaults.skillRadius;
-                cameraDistance = parsed.cameraDistance || defaults.cameraDistance;
-                cameraFov = parsed.cameraFov || defaults.cameraFov;
-                settings.circleRadius = parsed.circleRadius || defaults.circleRadius;
-                renderDistance = parsed.renderDistance || defaults.renderDistance;
-            }
+            // Load settings
+            loadSettings();
 
             // Scene setup
             scene = new THREE.Scene();
@@ -163,22 +190,22 @@
                 scene.add(line);
             }
 
-            // 4 Cylinders
-            const cylinderGeometry = new THREE.CylinderGeometry(0.2, 0.2, 2, 32);
-            const northCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xFF6600 }));
-            northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
+            // 4 Cylinders (5x larger: radius 0.2→1.0, height 2→10)
+            const cylinderGeometry = new THREE.CylinderGeometry(1.0, 1.0, 10, 32);
+            northCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xFF6600 }));
+            northCylinder.position.set(0, 5, settings.circleRadius + 0.5);
             northCylinder.castShadow = true;
             scene.add(northCylinder);
-            const eastCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
-            eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
+            eastCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            eastCylinder.position.set(settings.circleRadius + 0.5, 5, 0);
             eastCylinder.castShadow = true;
             scene.add(eastCylinder);
-            const southCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
-            southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
+            southCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            southCylinder.position.set(0, 5, -(settings.circleRadius + 0.5));
             southCylinder.castShadow = true;
             scene.add(southCylinder);
-            const westCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
-            westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
+            westCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            westCylinder.position.set(-(settings.circleRadius + 0.5), 5, 0);
             westCylinder.castShadow = true;
             scene.add(westCylinder);
 
@@ -187,11 +214,11 @@
             playerGroup.position.copy(position);
             scene.add(playerGroup);
 
-            // Player sphere
+            // Player sphere (on floor)
             const playerGeometry = new THREE.SphereGeometry(0.5, 32, 32);
             const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
             const playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
-            playerMesh.position.y = 1;
+            playerMesh.position.y = 0.5; // Center at y=0.5 to touch floor
             playerMesh.castShadow = true;
             playerGroup.add(playerMesh);
 
@@ -306,6 +333,12 @@
             playerSection.appendChild(createSlider('Skill Speed', 'skill-speed', 80, 400, 1, skillSpeed, (e) => {
                 skillSpeed = parseFloat(e.target.value);
             }));
+            playerSection.appendChild(createSlider('Skill Circle Size', 'skill-radius', 1, 40, 0.5, skillRadius, (e) => {
+                skillRadius = parseFloat(e.target.value);
+                const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
+                skillCircle.geometry.dispose();
+                skillCircle.geometry = newSkillGeometry;
+            }));
             uiPanel.appendChild(playerSection);
 
             // Camera Section
@@ -349,17 +382,11 @@
                     const line = new THREE.Line(geometry, lineMaterial);
                     scene.add(line);
                 }
-                northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
-                eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
-                southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
-                westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
+                northCylinder.position.set(0, 5, settings.circleRadius + 0.5);
+                eastCylinder.position.set(settings.circleRadius + 0.5, 5, 0);
+                southCylinder.position.set(0, 5, -(settings.circleRadius + 0.5));
+                westCylinder.position.set(-(settings.circleRadius + 0.5), 5, 0);
                 updateShadowCamera();
-            }));
-            areaSection.appendChild(createSlider('Skill Circle Size', 'skill-radius', 1, 10, 0.5, skillRadius, (e) => {
-                skillRadius = parseFloat(e.target.value);
-                const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
-                skillCircle.geometry.dispose();
-                skillCircle.geometry = newSkillGeometry;
             }));
             uiPanel.appendChild(areaSection);
 
@@ -385,19 +412,26 @@
             saveBtn.style.marginBottom = '5px';
             saveBtn.style.cursor = 'pointer';
             saveBtn.style.borderRadius = '0';
-            saveBtn.onclick = () => {
-                const savedSettings = {
-                    moveSpeed: settings.moveSpeed,
-                    skillSpeed: skillSpeed,
-                    skillRadius: skillRadius,
-                    cameraDistance: cameraDistance,
-                    cameraFov: cameraFov,
-                    circleRadius: settings.circleRadius,
-                    renderDistance: renderDistance
-                };
-                localStorage.setItem('gameSettings', JSON.stringify(savedSettings));
-            };
+            saveBtn.onclick = saveSettings;
             uiPanel.appendChild(saveBtn);
+
+            // Load button
+            const loadBtn = document.createElement('button');
+            loadBtn.textContent = 'Load Settings';
+            loadBtn.style.width = '100%';
+            saveBtn.style.backgroundColor = '#2196F3';
+            saveBtn.style.border = 'none';
+            saveBtn.style.color = '#fff';
+            saveBtn.style.padding = '5px';
+            saveBtn.style.marginBottom = '5px';
+            saveBtn.style.cursor = 'pointer';
+            saveBtn.style.borderRadius = '0';
+            loadBtn.onclick = () => {
+                loadSettings();
+                updateUI();
+                updateScene();
+            };
+            uiPanel.appendChild(loadBtn);
 
             // Reset button
             const resetBtn = document.createElement('button');
@@ -410,64 +444,14 @@
             resetBtn.style.cursor = 'pointer';
             resetBtn.style.borderRadius = '0';
             resetBtn.onclick = () => {
-                settings.moveSpeed = defaults.moveSpeed;
-                skillSpeed = defaults.skillSpeed;
-                skillRadius = defaults.skillRadius;
-                cameraDistance = defaults.cameraDistance;
-                cameraFov = defaults.cameraFov;
-                settings.circleRadius = defaults.circleRadius;
-                renderDistance = defaults.renderDistance;
-
-                document.getElementById('player-speed').value = settings.moveSpeed;
-                document.getElementById('player-speed-value').textContent = settings.moveSpeed.toFixed(0);
-                document.getElementById('skill-speed').value = skillSpeed;
-                document.getElementById('skill-speed-value').textContent = skillSpeed.toFixed(0);
-                document.getElementById('skill-radius').value = skillRadius;
-                document.getElementById('skill-radius-value').textContent = skillRadius.toFixed(2);
-                document.getElementById('cam-dist').value = cameraDistance;
-                document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
-                document.getElementById('cam-fov').value = cameraFov;
-                document.getElementById('cam-fov-value').textContent = cameraFov.toFixed(0);
-                document.getElementById('circle-radius').value = settings.circleRadius;
-                document.getElementById('circle-radius-value').textContent = settings.circleRadius.toFixed(0);
-                document.getElementById('render-distance').value = renderDistance;
-                document.getElementById('render-distance-value').textContent = renderDistance.toFixed(0);
-
-                const newGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
-                floor.geometry.dispose();
-                floor.geometry = newGeometry;
-                scene.children.forEach(child => {
-                    if (child.isLine && child.geometry.attributes.position) {
-                        child.geometry.dispose();
-                        scene.remove(child);
-                    }
-                });
-                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
-                for (let i = 0; i < 8; i++) {
-                    const angle = (i * Math.PI / 4) + (Math.PI / 8);
-                    const points = [
-                        new THREE.Vector3(0, 0.01, 0),
-                        new THREE.Vector3(Math.cos(angle) * settings.circleRadius, 0.01, Math.sin(angle) * settings.circleRadius)
-                    ];
-                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                    const line = new THREE.Line(geometry, lineMaterial);
-                    scene.add(line);
-                }
-                northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
-                eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
-                southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
-                westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
-                const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
-                skillCircle.geometry.dispose();
-                skillCircle.geometry = newSkillGeometry;
-                camera.fov = cameraFov;
-                camera.far = renderDistance;
-                camera.updateProjectionMatrix();
-                updateShadowCamera();
-
-                updateCameraPosition();
+                useDefaults();
+                updateUI();
+                updateScene();
             };
             uiPanel.appendChild(resetBtn);
+
+            // Update UI to reflect loaded settings
+            updateUI();
 
             // Event listeners
             window.addEventListener('resize', onWindowResize);
@@ -479,8 +463,60 @@
             updateCameraPosition();
         }
 
+        function updateUI() {
+            document.getElementById('player-speed').value = settings.moveSpeed;
+            document.getElementById('player-speed-value').textContent = settings.moveSpeed.toFixed(0);
+            document.getElementById('skill-speed').value = skillSpeed;
+            document.getElementById('skill-speed-value').textContent = skillSpeed.toFixed(0);
+            document.getElementById('skill-radius').value = skillRadius;
+            document.getElementById('skill-radius-value').textContent = skillRadius.toFixed(2);
+            document.getElementById('cam-dist').value = cameraDistance;
+            document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+            document.getElementById('cam-fov').value = cameraFov;
+            document.getElementById('cam-fov-value').textContent = cameraFov.toFixed(0);
+            document.getElementById('circle-radius').value = settings.circleRadius;
+            document.getElementById('circle-radius-value').textContent = settings.circleRadius.toFixed(0);
+            document.getElementById('render-distance').value = renderDistance;
+            document.getElementById('render-distance-value').textContent = renderDistance.toFixed(0);
+        }
+
+        function updateScene() {
+            const newGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
+            floor.geometry.dispose();
+            floor.geometry = newGeometry;
+            scene.children.forEach(child => {
+                if (child.isLine && child.geometry.attributes.position) {
+                    child.geometry.dispose();
+                    scene.remove(child);
+                }
+            });
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+            for (let i = 0; i < 8; i++) {
+                const angle = (i * Math.PI / 4) + (Math.PI / 8);
+                const points = [
+                    new THREE.Vector3(0, 0.01, 0),
+                    new THREE.Vector3(Math.cos(angle) * settings.circleRadius, 0.01, Math.sin(angle) * settings.circleRadius)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, lineMaterial);
+                scene.add(line);
+            }
+            northCylinder.position.set(0, 5, settings.circleRadius + 0.5);
+            eastCylinder.position.set(settings.circleRadius + 0.5, 5, 0);
+            southCylinder.position.set(0, 5, -(settings.circleRadius + 0.5));
+            westCylinder.position.set(-(settings.circleRadius + 0.5), 5, 0);
+            const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
+            skillCircle.geometry.dispose();
+            skillCircle.geometry = newSkillGeometry;
+            camera.fov = cameraFov;
+            camera.far = renderDistance;
+            camera.updateProjectionMatrix();
+            updateShadowCamera();
+            updateCameraPosition();
+        }
+
         function updateShadowCamera() {
-            const shadowSize = settings.circleRadius * 1.2; // 20% larger than circle to ensure coverage
+            const shadowSize = settings.circleRadius * 1.2;
             dirLight.shadow.camera.top = shadowSize;
             dirLight.shadow.camera.right = shadowSize;
             dirLight.shadow.camera.bottom = -shadowSize;
@@ -509,16 +545,16 @@
                     const distFromPlayer = Math.sqrt((point.x - position.x) ** 2 + (point.z - position.z) ** 2);
                     if (distFromPlayer <= skillRadius) {
                         targetPosition = point.clone();
-                        targetPosition.y = 1;
+                        targetPosition.y = 0.5;
                         isSkillMoving = true;
                         isSkillMode = false;
                         skillCircle.visible = false;
-                        currentMoveSpeed = skillSpeed / 10; // Adjusted for slower movement
+                        currentMoveSpeed = skillSpeed / 10;
                     }
                 } else if (!isSkillMoving) {
                     targetPosition = point.clone();
-                    targetPosition.y = 1;
-                    currentMoveSpeed = settings.moveSpeed / 10; // Adjusted for slower movement
+                    targetPosition.y = 0.5;
+                    currentMoveSpeed = settings.moveSpeed / 10;
                 }
             }
         }
@@ -556,7 +592,7 @@
                 const oldZ = position.z;
                 position.x *= scale;
                 position.z *= scale;
-                position.y = 1;
+                position.y = 0.5;
                 camera.position.x += (position.x - oldX);
                 camera.position.z += (position.z - oldZ);
                 playerGroup.position.copy(position);
@@ -584,7 +620,7 @@
 
         function onWheel(e) {
             if (e.target.closest('#ui-panel')) return;
-            const delta = e.deltaY > 0 ? 0.2 : -0.2;
+            const delta = e.deltaY > 0 ? 1.0 : -1.0;
             cameraDistance = Math.max(10, Math.min(50, cameraDistance + delta));
             updateCameraPosition();
             const camSlider = document.getElementById('cam-dist');
@@ -599,7 +635,7 @@
 
             // Click-to-move or skill movement
             if (targetPosition && (!isSkillMoving || currentMoveSpeed === skillSpeed / 10)) {
-                const moveSpeed = currentMoveSpeed * delta; // Apply delta for frame-rate independence
+                const moveSpeed = currentMoveSpeed * delta;
                 const direction = targetPosition.clone().sub(position).normalize();
                 const step = direction.clone().multiplyScalar(moveSpeed);
                 const oldX = position.x;
@@ -607,7 +643,7 @@
                 if (step.length() >= position.distanceTo(targetPosition)) {
                     position.x = targetPosition.x;
                     position.z = targetPosition.z;
-                    position.y = 1;
+                    position.y = 0.5;
                     camera.position.x += targetPosition.x - oldX;
                     camera.position.z += targetPosition.z - oldZ;
                     playerGroup.position.copy(position);
@@ -616,7 +652,7 @@
                 } else {
                     position.x += step.x;
                     position.z += step.z;
-                    position.y = 1;
+                    position.y = 0.5;
                     camera.position.x += step.x;
                     camera.position.z += step.z;
                     playerGroup.position.copy(position);
@@ -645,7 +681,7 @@
                     const oldZ = position.z;
                     position.x += ease.x;
                     position.z += ease.z;
-                    position.y = 1;
+                    position.y = 0.5;
                     camera.position.x += ease.x;
                     camera.position.z += ease.z;
                     playerGroup.position.copy(position);

@@ -13,11 +13,30 @@
         #ui-panel, #ui-panel label, #ui-panel span, #ui-panel button {
             font-family: 'Noto Sans TC', Arial, sans-serif;
         }
+        #info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            z-index: 10;
+        }
+        .ui-section {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 5px;
+        }
+        .ui-section h3 {
+            margin-top: 0;
+            color: #fff;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
     <div id="container"></div>
-
     <script type="importmap">
         {
             "imports": {
@@ -31,37 +50,40 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        let scene, renderer, camera, floor, player, controls;
-        let cameraDistance = 5;
-        let azimuthalAngle = Math.PI / 4;
-        let polarAngle = Math.PI / 4;
-        let prevAzimuthalAngle = Math.PI / 4; // Initialize to match initial azimuthalAngle
-        let prevPolarAngle = Math.PI / 4; // Initialize to match initial polarAngle
-        let minDistance = 2;
-        let maxDistance = 15;
-        const maxPolarAngle = Math.PI / 2 - 0.01;
+        let scene, renderer, camera, floor, playerGroup, orbitControls, clock, dirLight;
+        let cameraDistance = 10;
+        let cameraFov = 80;
+        let renderDistance = 100;
         const keys = { w: false, a: false, s: false, d: false, '1': false };
         let uiPanel, toggleBtn;
         let raycaster = new THREE.Raycaster();
         let mouse = new THREE.Vector2();
         let targetPosition = null;
-        let currentSpeed = 0.1;
         let isSkillMode = false;
         let isSkillMoving = false;
-        let skillSpeed = 0.3; // Faster skill speed
+        let skillSpeed = 240;
         let skillCircle;
-        let skillRadius = 5; // Skill area radius
+        let skillRadius = 5;
+        let ease = new THREE.Vector3();
+        let position = new THREE.Vector3(0, 1, 0);
+        let up = new THREE.Vector3(0, 1, 0);
+        let rotate = new THREE.Quaternion();
+        let currentMoveSpeed = 80;
 
         const defaults = {
-            moveSpeed: 0.1,
-            minDistance: 2,
-            maxDistance: 15,
-            cameraDistance: 5
+            moveSpeed: 80,
+            skillSpeed: 240,
+            skillRadius: 5,
+            cameraDistance: 10,
+            cameraFov: 80,
+            circleRadius: 40,
+            renderDistance: 100
         };
 
         const settings = {
             moveSpeed: defaults.moveSpeed,
-            circleRadius: 20 // Not changeable via UI
+            circleRadius: defaults.circleRadius,
+            rotateSpeed: 0.05
         };
 
         init();
@@ -82,9 +104,12 @@
             if (saved) {
                 const parsed = JSON.parse(saved);
                 settings.moveSpeed = parsed.moveSpeed || defaults.moveSpeed;
-                minDistance = parsed.minDistance || defaults.minDistance;
-                maxDistance = parsed.maxDistance || defaults.maxDistance;
+                skillSpeed = parsed.skillSpeed || defaults.skillSpeed;
+                skillRadius = parsed.skillRadius || defaults.skillRadius;
                 cameraDistance = parsed.cameraDistance || defaults.cameraDistance;
+                cameraFov = parsed.cameraFov || defaults.cameraFov;
+                settings.circleRadius = parsed.circleRadius || defaults.circleRadius;
+                renderDistance = parsed.renderDistance || defaults.renderDistance;
             }
 
             // Scene setup
@@ -92,8 +117,11 @@
             scene.background = new THREE.Color(0x5e5d5d);
 
             // Camera setup
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 2, -5);
+            camera = new THREE.PerspectiveCamera(cameraFov, window.innerWidth / window.innerHeight, 0.1, renderDistance);
+            camera.position.set(0, 2.5, -cameraDistance);
+
+            // Clock
+            clock = new THREE.Clock();
 
             // Renderer setup
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -106,18 +134,15 @@
             // Lights
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-            dirLight.position.set(-2, 5, -3);
+            dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(0, 10, 0);
             dirLight.castShadow = true;
-            dirLight.shadow.camera.top = dirLight.shadow.camera.right = 2;
-            dirLight.shadow.camera.bottom = dirLight.shadow.camera.left = -2;
-            dirLight.shadow.camera.near = 3;
-            dirLight.shadow.camera.far = 8;
-            dirLight.shadow.mapSize.set(1024, 1024);
+            updateShadowCamera();
+            dirLight.shadow.mapSize.set(2048, 2048);
             scene.add(dirLight);
             scene.add(dirLight.target);
 
-            // Floor (circular with configurable radius)
+            // Floor (circle)
             const floorGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
             const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, side: THREE.DoubleSide });
             floor = new THREE.Mesh(floorGeometry, floorMaterial);
@@ -125,20 +150,52 @@
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Circular grid on floor
-            const gridTexture = new THREE.GridHelper(settings.circleRadius * 2, 40, 0x000000, 0x000000);
-            gridTexture.position.y = 0.01;
-            scene.add(gridTexture);
+            // Reference points (8 radial lines, offset by 22.5°)
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+            for (let i = 0; i < 8; i++) {
+                const angle = (i * Math.PI / 4) + (Math.PI / 8);
+                const points = [
+                    new THREE.Vector3(0, 0.01, 0),
+                    new THREE.Vector3(Math.cos(angle) * settings.circleRadius, 0.01, Math.sin(angle) * settings.circleRadius)
+                ];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, lineMaterial);
+                scene.add(line);
+            }
 
-            // Player (green sphere)
+            // 4 Cylinders
+            const cylinderGeometry = new THREE.CylinderGeometry(0.2, 0.2, 2, 32);
+            const northCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xFF6600 }));
+            northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
+            northCylinder.castShadow = true;
+            scene.add(northCylinder);
+            const eastCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
+            eastCylinder.castShadow = true;
+            scene.add(eastCylinder);
+            const southCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
+            southCylinder.castShadow = true;
+            scene.add(southCylinder);
+            const westCylinder = new THREE.Mesh(cylinderGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
+            westCylinder.castShadow = true;
+            scene.add(westCylinder);
+
+            // Player group
+            playerGroup = new THREE.Group();
+            playerGroup.position.copy(position);
+            scene.add(playerGroup);
+
+            // Player sphere
             const playerGeometry = new THREE.SphereGeometry(0.5, 32, 32);
             const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-            player = new THREE.Mesh(playerGeometry, playerMaterial);
-            player.position.y = 0.5;
-            player.castShadow = true;
-            scene.add(player);
+            const playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
+            playerMesh.position.y = 1;
+            playerMesh.castShadow = true;
+            playerGroup.add(playerMesh);
 
-            // Skill circle visual
+            // Skill circle
             const skillGeometry = new THREE.CircleGeometry(skillRadius, 32);
             const skillMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
             skillCircle = new THREE.Mesh(skillGeometry, skillMaterial);
@@ -147,21 +204,21 @@
             skillCircle.visible = false;
             scene.add(skillCircle);
 
-            // OrbitControls for right-click rotation (no smoothing)
-            controls = new OrbitControls(camera, renderer.domElement);
-            controls.target.copy(player.position);
-            controls.enableDamping = false;
-            controls.dampingFactor = 0;
-            controls.mouseButtons = {
+            // OrbitControls
+            orbitControls = new OrbitControls(camera, renderer.domElement);
+            orbitControls.target.copy(position);
+            orbitControls.enableDamping = false;
+            orbitControls.enablePan = false;
+            orbitControls.maxPolarAngle = Math.PI / 2 - 0.05;
+            orbitControls.mouseButtons = {
                 LEFT: null,
                 MIDDLE: null,
                 RIGHT: THREE.MOUSE.ROTATE
             };
-            controls.enableZoom = false;
-            controls.enablePan = false;
-            controls.maxPolarAngle = maxPolarAngle;
+            orbitControls.enableZoom = false;
+            orbitControls.update();
 
-            // UI Panel (dark theme, vertical layout, rectangular)
+            // UI Panel
             uiPanel = document.createElement('div');
             uiPanel.id = 'ui-panel';
             uiPanel.style.position = 'absolute';
@@ -178,13 +235,9 @@
             uiPanel.style.display = 'block';
             document.body.appendChild(uiPanel);
 
-            // Prevent wheel events from propagating to camera zoom when over panel
-            uiPanel.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                // Browser handles scrolling if overflow
-            }, { passive: false });
+            uiPanel.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
-            // Toggle button (outside uiPanel for persistent visibility)
+            // Toggle button
             toggleBtn = document.createElement('button');
             toggleBtn.textContent = 'Hide Settings';
             toggleBtn.style.position = 'absolute';
@@ -203,7 +256,7 @@
             };
             document.body.appendChild(toggleBtn);
 
-            // Function to create slider section with value display
+            // Create slider function
             function createSlider(labelText, id, min, max, step, value, onChange) {
                 const div = document.createElement('div');
                 div.style.marginBottom = '15px';
@@ -224,14 +277,12 @@
                 slider.style.width = '100%';
                 slider.oninput = (e) => {
                     onChange(e);
-                    if (uiPanel.style.display !== 'none') {
-                        valueDisplay.textContent = parseFloat(e.target.value).toFixed(2);
-                    }
+                    valueDisplay.textContent = parseFloat(e.target.value).toFixed(id === 'player-speed' || id === 'skill-speed' || id === 'render-distance' || id === 'cam-fov' ? 0 : 2);
                 };
 
                 const valueDisplay = document.createElement('span');
                 valueDisplay.id = id + '-value';
-                valueDisplay.textContent = parseFloat(value).toFixed(2);
+                valueDisplay.textContent = parseFloat(value).toFixed(id === 'player-speed' || id === 'skill-speed' || id === 'render-distance' || id === 'cam-fov' ? 0 : 2);
                 valueDisplay.style.marginLeft = '10px';
 
                 const sliderContainer = document.createElement('div');
@@ -245,46 +296,83 @@
                 return div;
             }
 
-            // Player Speed slider
-            uiPanel.appendChild(createSlider('Player Speed', 'player-speed', 0.01, 1, 0.01, settings.moveSpeed, (e) => {
+            // Player Section
+            const playerSection = document.createElement('div');
+            playerSection.className = 'ui-section';
+            playerSection.innerHTML = '<h3>Player</h3>';
+            playerSection.appendChild(createSlider('Player Speed', 'player-speed', 80, 200, 1, settings.moveSpeed, (e) => {
                 settings.moveSpeed = parseFloat(e.target.value);
             }));
-
-            // Min Camera Distance slider
-            uiPanel.appendChild(createSlider('Min Camera Distance', 'min-dist', 0.1, 10, 0.1, minDistance, (e) => {
-                minDistance = parseFloat(e.target.value);
-                const camSlider = document.getElementById('cam-dist');
-                camSlider.min = minDistance;
-                if (cameraDistance < minDistance) {
-                    cameraDistance = minDistance;
-                    camSlider.value = cameraDistance;
-                    if (uiPanel.style.display !== 'none') {
-                        document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
-                    }
-                    updateCameraPosition();
-                }
+            playerSection.appendChild(createSlider('Skill Speed', 'skill-speed', 80, 400, 1, skillSpeed, (e) => {
+                skillSpeed = parseFloat(e.target.value);
             }));
+            uiPanel.appendChild(playerSection);
 
-            // Max Camera Distance slider
-            uiPanel.appendChild(createSlider('Max Camera Distance', 'max-dist', 5, 50, 1, maxDistance, (e) => {
-                maxDistance = parseFloat(e.target.value);
-                const camSlider = document.getElementById('cam-dist');
-                camSlider.max = maxDistance;
-                if (cameraDistance > maxDistance) {
-                    cameraDistance = maxDistance;
-                    camSlider.value = cameraDistance;
-                    if (uiPanel.style.display !== 'none') {
-                        document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
-                    }
-                    updateCameraPosition();
-                }
-            }));
-
-            // Current Camera Distance slider
-            uiPanel.appendChild(createSlider('Camera Distance', 'cam-dist', minDistance, maxDistance, 0.1, cameraDistance, (e) => {
+            // Camera Section
+            const cameraSection = document.createElement('div');
+            cameraSection.className = 'ui-section';
+            cameraSection.innerHTML = '<h3>Camera</h3>';
+            cameraSection.appendChild(createSlider('Camera Distance', 'cam-dist', 10, 50, 0.1, cameraDistance, (e) => {
                 cameraDistance = parseFloat(e.target.value);
                 updateCameraPosition();
             }));
+            cameraSection.appendChild(createSlider('Camera FOV', 'cam-fov', 30, 120, 1, cameraFov, (e) => {
+                cameraFov = parseFloat(e.target.value);
+                camera.fov = cameraFov;
+                camera.updateProjectionMatrix();
+            }));
+            uiPanel.appendChild(cameraSection);
+
+            // Area Section
+            const areaSection = document.createElement('div');
+            areaSection.className = 'ui-section';
+            areaSection.innerHTML = '<h3>Area</h3>';
+            areaSection.appendChild(createSlider('Circle Radius', 'circle-radius', 10, 100, 1, settings.circleRadius, (e) => {
+                settings.circleRadius = parseFloat(e.target.value);
+                const newGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
+                floor.geometry.dispose();
+                floor.geometry = newGeometry;
+                scene.children.forEach(child => {
+                    if (child.isLine && child.geometry.attributes.position) {
+                        child.geometry.dispose();
+                        scene.remove(child);
+                    }
+                });
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i * Math.PI / 4) + (Math.PI / 8);
+                    const points = [
+                        new THREE.Vector3(0, 0.01, 0),
+                        new THREE.Vector3(Math.cos(angle) * settings.circleRadius, 0.01, Math.sin(angle) * settings.circleRadius)
+                    ];
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, lineMaterial);
+                    scene.add(line);
+                }
+                northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
+                eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
+                southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
+                westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
+                updateShadowCamera();
+            }));
+            areaSection.appendChild(createSlider('Skill Circle Size', 'skill-radius', 1, 10, 0.5, skillRadius, (e) => {
+                skillRadius = parseFloat(e.target.value);
+                const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
+                skillCircle.geometry.dispose();
+                skillCircle.geometry = newSkillGeometry;
+            }));
+            uiPanel.appendChild(areaSection);
+
+            // Debug Section
+            const debugSection = document.createElement('div');
+            debugSection.className = 'ui-section';
+            debugSection.innerHTML = '<h3>Debug</h3>';
+            debugSection.appendChild(createSlider('Render Distance', 'render-distance', 10, 500, 1, renderDistance, (e) => {
+                renderDistance = parseFloat(e.target.value);
+                camera.far = renderDistance;
+                camera.updateProjectionMatrix();
+            }));
+            uiPanel.appendChild(debugSection);
 
             // Save button
             const saveBtn = document.createElement('button');
@@ -300,9 +388,12 @@
             saveBtn.onclick = () => {
                 const savedSettings = {
                     moveSpeed: settings.moveSpeed,
-                    minDistance: minDistance,
-                    maxDistance: maxDistance,
-                    cameraDistance: cameraDistance
+                    skillSpeed: skillSpeed,
+                    skillRadius: skillRadius,
+                    cameraDistance: cameraDistance,
+                    cameraFov: cameraFov,
+                    circleRadius: settings.circleRadius,
+                    renderDistance: renderDistance
                 };
                 localStorage.setItem('gameSettings', JSON.stringify(savedSettings));
             };
@@ -319,37 +410,60 @@
             resetBtn.style.cursor = 'pointer';
             resetBtn.style.borderRadius = '0';
             resetBtn.onclick = () => {
-                // Load saved settings or fall back to defaults
-                const saved = localStorage.getItem('gameSettings');
-                let resetSettings = { ...defaults };
-                if (saved) {
-                    resetSettings = JSON.parse(saved);
-                }
+                settings.moveSpeed = defaults.moveSpeed;
+                skillSpeed = defaults.skillSpeed;
+                skillRadius = defaults.skillRadius;
+                cameraDistance = defaults.cameraDistance;
+                cameraFov = defaults.cameraFov;
+                settings.circleRadius = defaults.circleRadius;
+                renderDistance = defaults.renderDistance;
 
-                settings.moveSpeed = resetSettings.moveSpeed || defaults.moveSpeed;
-                minDistance = resetSettings.minDistance || defaults.minDistance;
-                maxDistance = resetSettings.maxDistance || defaults.maxDistance;
-                cameraDistance = resetSettings.cameraDistance || defaults.cameraDistance;
-
-                // Update sliders and their value displays (only if panel is visible)
                 document.getElementById('player-speed').value = settings.moveSpeed;
-                if (uiPanel.style.display !== 'none') {
-                    document.getElementById('player-speed-value').textContent = settings.moveSpeed.toFixed(2);
-                }
-                document.getElementById('min-dist').value = minDistance;
-                if (uiPanel.style.display !== 'none') {
-                    document.getElementById('min-dist-value').textContent = minDistance.toFixed(2);
-                }
-                document.getElementById('max-dist').value = maxDistance;
-                if (uiPanel.style.display !== 'none') {
-                    document.getElementById('max-dist-value').textContent = maxDistance.toFixed(2);
-                }
+                document.getElementById('player-speed-value').textContent = settings.moveSpeed.toFixed(0);
+                document.getElementById('skill-speed').value = skillSpeed;
+                document.getElementById('skill-speed-value').textContent = skillSpeed.toFixed(0);
+                document.getElementById('skill-radius').value = skillRadius;
+                document.getElementById('skill-radius-value').textContent = skillRadius.toFixed(2);
                 document.getElementById('cam-dist').value = cameraDistance;
-                if (uiPanel.style.display !== 'none') {
-                    document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+                document.getElementById('cam-fov').value = cameraFov;
+                document.getElementById('cam-fov-value').textContent = cameraFov.toFixed(0);
+                document.getElementById('circle-radius').value = settings.circleRadius;
+                document.getElementById('circle-radius-value').textContent = settings.circleRadius.toFixed(0);
+                document.getElementById('render-distance').value = renderDistance;
+                document.getElementById('render-distance-value').textContent = renderDistance.toFixed(0);
+
+                const newGeometry = new THREE.CircleGeometry(settings.circleRadius, 32);
+                floor.geometry.dispose();
+                floor.geometry = newGeometry;
+                scene.children.forEach(child => {
+                    if (child.isLine && child.geometry.attributes.position) {
+                        child.geometry.dispose();
+                        scene.remove(child);
+                    }
+                });
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i * Math.PI / 4) + (Math.PI / 8);
+                    const points = [
+                        new THREE.Vector3(0, 0.01, 0),
+                        new THREE.Vector3(Math.cos(angle) * settings.circleRadius, 0.01, Math.sin(angle) * settings.circleRadius)
+                    ];
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, lineMaterial);
+                    scene.add(line);
                 }
-                document.getElementById('cam-dist').min = minDistance;
-                document.getElementById('cam-dist').max = maxDistance;
+                northCylinder.position.set(0, 1, settings.circleRadius + 0.5);
+                eastCylinder.position.set(settings.circleRadius + 0.5, 1, 0);
+                southCylinder.position.set(0, 1, -(settings.circleRadius + 0.5));
+                westCylinder.position.set(-(settings.circleRadius + 0.5), 1, 0);
+                const newSkillGeometry = new THREE.CircleGeometry(skillRadius, 32);
+                skillCircle.geometry.dispose();
+                skillCircle.geometry = newSkillGeometry;
+                camera.fov = cameraFov;
+                camera.far = renderDistance;
+                camera.updateProjectionMatrix();
+                updateShadowCamera();
 
                 updateCameraPosition();
             };
@@ -362,13 +476,23 @@
             document.addEventListener('keyup', onKeyUp);
             window.addEventListener('mousedown', onMouseDown);
 
-            // Initial camera position
             updateCameraPosition();
         }
 
+        function updateShadowCamera() {
+            const shadowSize = settings.circleRadius * 1.2; // 20% larger than circle to ensure coverage
+            dirLight.shadow.camera.top = shadowSize;
+            dirLight.shadow.camera.right = shadowSize;
+            dirLight.shadow.camera.bottom = -shadowSize;
+            dirLight.shadow.camera.left = -shadowSize;
+            dirLight.shadow.camera.near = 0.1;
+            dirLight.shadow.camera.far = 50;
+            dirLight.shadow.camera.updateProjectionMatrix();
+        }
+
         function onMouseDown(event) {
-            if (event.button !== 0) return; // Only left click
-            if (event.target.closest('#ui-panel')) return; // Ignore clicks on UI panel
+            if (event.target.closest('#ui-panel')) return;
+            if (event.button !== 0) return;
 
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -379,39 +503,42 @@
             if (intersects.length > 0) {
                 const point = intersects[0].point;
                 const distFromCenter = Math.sqrt(point.x ** 2 + point.z ** 2);
+                if (distFromCenter > settings.circleRadius - 0.5) return;
 
-                if (distFromCenter > settings.circleRadius - 0.5) return; // Outside main circle
-
-                if (isSkillMode) {
-                    // Check if click is within skill area
-                    const distFromPlayer = Math.sqrt(
-                        (point.x - player.position.x) ** 2 + 
-                        (point.z - player.position.z) ** 2
-                    );
+                if (isSkillMode && !isSkillMoving) {
+                    const distFromPlayer = Math.sqrt((point.x - position.x) ** 2 + (point.z - position.z) ** 2);
                     if (distFromPlayer <= skillRadius) {
                         targetPosition = point.clone();
-                        targetPosition.y = 0.5;
-                        currentSpeed = skillSpeed;
+                        targetPosition.y = 1;
                         isSkillMoving = true;
                         isSkillMode = false;
                         skillCircle.visible = false;
+                        currentMoveSpeed = skillSpeed / 10; // Adjusted for slower movement
                     }
                 } else if (!isSkillMoving) {
-                    // Normal click move
                     targetPosition = point.clone();
-                    targetPosition.y = 0.5;
-                    currentSpeed = settings.moveSpeed;
+                    targetPosition.y = 1;
+                    currentMoveSpeed = settings.moveSpeed / 10; // Adjusted for slower movement
                 }
             }
         }
 
         function onKeyDown(event) {
             const key = event.key.toLowerCase();
-            if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
-            if (key === '1' && !keys['1']) {
+            if (['w', 'a', 's', 'd'].includes(key)) {
+                if (!isSkillMoving && !isSkillMode) {
+                    keys[key] = true;
+                    targetPosition = null;
+                }
+            }
+            if (key === '1' && !keys['1'] && !isSkillMoving) {
                 keys['1'] = true;
                 isSkillMode = !isSkillMode;
                 skillCircle.visible = isSkillMode;
+                if (isSkillMode) {
+                    targetPosition = null;
+                    keys.w = keys.a = keys.s = keys.d = false;
+                }
             }
         }
 
@@ -422,33 +549,31 @@
         }
 
         function restrictPlayerToCircle() {
-            const distance = Math.sqrt(player.position.x * player.position.x + player.position.z * player.position.z);
+            const distance = Math.sqrt(position.x * position.x + position.z * position.z);
             if (distance > settings.circleRadius - 0.5) {
                 const scale = (settings.circleRadius - 0.5) / distance;
-                player.position.x *= scale;
-                player.position.z *= scale;
+                const oldX = position.x;
+                const oldZ = position.z;
+                position.x *= scale;
+                position.z *= scale;
+                position.y = 1;
+                camera.position.x += (position.x - oldX);
+                camera.position.z += (position.z - oldZ);
+                playerGroup.position.copy(position);
+                if (isSkillMoving) {
+                    targetPosition = null;
+                    isSkillMoving = false;
+                }
             }
         }
 
         function updateCameraPosition() {
-            // Clamp polar angle
-            polarAngle = Math.max(0, Math.min(maxPolarAngle, polarAngle));
-
-            // Convert spherical to Cartesian
-            const sinPolar = Math.sin(polarAngle);
-            const cosPolar = Math.cos(polarAngle);
-            const sinAzimuth = Math.sin(azimuthalAngle);
-            const cosAzimuth = Math.cos(azimuthalAngle);
-
-            const offset = new THREE.Vector3(
-                cameraDistance * sinPolar * cosAzimuth,
-                cameraDistance * cosPolar,
-                cameraDistance * sinPolar * sinAzimuth
-            );
-
-            camera.position.copy(player.position).add(offset);
-            camera.lookAt(player.position);
-            controls.target.copy(player.position);
+            const playerPos = position.clone();
+            const direction = camera.position.clone().sub(playerPos).normalize();
+            const newPos = playerPos.clone().add(direction.multiplyScalar(cameraDistance));
+            camera.position.copy(newPos);
+            orbitControls.target.copy(playerPos);
+            orbitControls.update();
         }
 
         function onWindowResize() {
@@ -458,87 +583,88 @@
         }
 
         function onWheel(e) {
-            // Only handle wheel if not over UI panel
             if (e.target.closest('#ui-panel')) return;
             const delta = e.deltaY > 0 ? 0.2 : -0.2;
-            cameraDistance = Math.max(minDistance, Math.min(maxDistance, cameraDistance + delta));
-            if (uiPanel.style.display !== 'none') {
-                const camSlider = document.getElementById('cam-dist');
-                if (camSlider) {
-                    camSlider.value = cameraDistance;
-                    document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+            cameraDistance = Math.max(10, Math.min(50, cameraDistance + delta));
+            updateCameraPosition();
+            const camSlider = document.getElementById('cam-dist');
+            if (camSlider) {
+                camSlider.value = cameraDistance;
+                document.getElementById('cam-dist-value').textContent = cameraDistance.toFixed(2);
+            }
+        }
+
+        function updateCharacter(delta) {
+            const azimuth = orbitControls.getAzimuthalAngle();
+
+            // Click-to-move or skill movement
+            if (targetPosition && (!isSkillMoving || currentMoveSpeed === skillSpeed / 10)) {
+                const moveSpeed = currentMoveSpeed * delta; // Apply delta for frame-rate independence
+                const direction = targetPosition.clone().sub(position).normalize();
+                const step = direction.clone().multiplyScalar(moveSpeed);
+                const oldX = position.x;
+                const oldZ = position.z;
+                if (step.length() >= position.distanceTo(targetPosition)) {
+                    position.x = targetPosition.x;
+                    position.z = targetPosition.z;
+                    position.y = 1;
+                    camera.position.x += targetPosition.x - oldX;
+                    camera.position.z += targetPosition.z - oldZ;
+                    playerGroup.position.copy(position);
+                    targetPosition = null;
+                    isSkillMoving = false;
+                } else {
+                    position.x += step.x;
+                    position.z += step.z;
+                    position.y = 1;
+                    camera.position.x += step.x;
+                    camera.position.z += step.z;
+                    playerGroup.position.copy(position);
+                }
+                restrictPlayerToCircle();
+                orbitControls.target.copy(position);
+                orbitControls.update();
+                return;
+            }
+
+            // WASD movement
+            if (!isSkillMoving && !isSkillMode) {
+                let forward = 0;
+                if (keys.w) forward = -1;
+                if (keys.s) forward = 1;
+                let strafe = 0;
+                if (keys.a) strafe = -1;
+                if (keys.d) strafe = 1;
+
+                if (forward !== 0 || strafe !== 0) {
+                    ease.set(strafe, 0, forward).multiplyScalar((settings.moveSpeed / 10) * delta);
+                    const angle = Math.atan2(ease.x, ease.z) + azimuth;
+                    rotate.setFromAxisAngle(up, angle);
+                    ease.applyAxisAngle(up, azimuth);
+                    const oldX = position.x;
+                    const oldZ = position.z;
+                    position.x += ease.x;
+                    position.z += ease.z;
+                    position.y = 1;
+                    camera.position.x += ease.x;
+                    camera.position.z += ease.z;
+                    playerGroup.position.copy(position);
+                    playerGroup.quaternion.rotateTowards(rotate, settings.rotateSpeed);
+                    restrictPlayerToCircle();
+                    orbitControls.target.copy(position);
+                    orbitControls.update();
                 }
             }
-            updateCameraPosition();
         }
 
         function animate() {
             requestAnimationFrame(animate);
-
-            // Update skill circle position if active
+            const delta = clock.getDelta();
             if (isSkillMode) {
-                skillCircle.position.x = player.position.x;
-                skillCircle.position.z = player.position.z;
+                skillCircle.position.x = position.x;
+                skillCircle.position.z = position.z;
             }
-
-            // Handle target movement (click-based or skill-based)
-            if (targetPosition) {
-                const direction = targetPosition.clone().sub(player.position).normalize();
-                const step = direction.clone().multiplyScalar(currentSpeed);
-                if (step.length() >= player.position.distanceTo(targetPosition)) {
-                    player.position.copy(targetPosition);
-                    targetPosition = null;
-                    if (isSkillMoving) {
-                        isSkillMoving = false;
-                    }
-                } else {
-                    player.position.add(step);
-                }
-                restrictPlayerToCircle();
-                updateCameraPosition();
-            } else if (!isSkillMode && !isSkillMoving) {
-                // WASD movement only if not targeting, not in skill mode, not skill moving
-                const cameraDirection = new THREE.Vector3();
-                camera.getWorldDirection(cameraDirection);
-                cameraDirection.y = 0;
-                cameraDirection.normalize();
-
-                const rightVector = new THREE.Vector3();
-                rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0)).normalize();
-
-                const moveVector = new THREE.Vector3(0, 0, 0);
-                if (keys.w) moveVector.add(cameraDirection);
-                if (keys.s) moveVector.sub(cameraDirection);
-                if (keys.a) moveVector.sub(rightVector);
-                if (keys.d) moveVector.add(rightVector);
-
-                if (moveVector.lengthSq() > 0) {
-                    moveVector.normalize().multiplyScalar(settings.moveSpeed);
-                    player.position.add(moveVector);
-                    restrictPlayerToCircle();
-                    updateCameraPosition();
-                }
-            }
-
-            // Update camera rotation from OrbitControls (runs independently)
-            controls.update();
-            const deltaX = camera.position.x - player.position.x;
-            const deltaZ = camera.position.z - player.position.z;
-            const deltaY = camera.position.y - player.position.y;
-            const horizontalDistance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
-            azimuthalAngle = Math.atan2(deltaZ, deltaX);
-            polarAngle = Math.atan2(horizontalDistance, deltaY);
-
-            // Update camera position if angles changed
-            if (Math.abs(azimuthalAngle - prevAzimuthalAngle) > 0.0001 ||
-                Math.abs(polarAngle - prevPolarAngle) > 0.0001) {
-                updateCameraPosition();
-            }
-
-            // Update previous angles for next frame
-            prevAzimuthalAngle = azimuthalAngle;
-            prevPolarAngle = polarAngle;
-
+            updateCharacter(delta);
             renderer.render(scene, camera);
         }
     </script>

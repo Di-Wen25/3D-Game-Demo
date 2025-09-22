@@ -4,7 +4,7 @@ import { updateCamera } from './camera.js';
 
 export class Player {
     constructor(scene) {
-        this.position = new THREE.Vector3(0, 0.5, 0);
+        this.position = new THREE.Vector3(0, 0, 0);
         this.targetPosition = null;
         this.isSkillMode = false;
         this.isSkillMoving = false;
@@ -19,10 +19,10 @@ export class Player {
         this.playerGroup.position.copy(this.position);
         scene.add(this.playerGroup);
 
-        const playerGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+        const playerGeometry = new THREE.SphereGeometry(1, 32, 32);
         const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
         const playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
-        playerMesh.position.y = 0.5;
+        //playerMesh.position.y = 0.5;
         playerMesh.castShadow = true;
         this.playerGroup.add(playerMesh);
 
@@ -104,7 +104,7 @@ export class Player {
             const oldZ = this.position.z;
             this.position.x *= scale;
             this.position.z *= scale;
-            this.position.y = 0.5;
+            //this.position.y = 0.5;
             this.playerGroup.position.copy(this.position);
             camera.position.x += this.position.x - oldX;
             camera.position.z += this.position.z - oldZ;

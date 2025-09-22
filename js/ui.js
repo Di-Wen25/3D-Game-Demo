@@ -210,13 +210,13 @@ export function loadSettings(player, cameraData) {
             if (typeof parsed !== 'object' || parsed === null) {
                 throw new Error('Invalid settings format');
             }
-            settings.moveSpeed = Math.max(120, Math.min(220, parsed.moveSpeed || defaults.moveSpeed));
-            player.skillSpeed = Math.max(120, Math.min(800, parsed.skillSpeed || defaults.skillSpeed));
-            player.skillRadius = Math.max(30, Math.min(50, parsed.skillRadius || defaults.skillRadius));
-            cameraData.cameraDistance = Math.max(10, Math.min(100, parsed.cameraDistance || defaults.cameraDistance));
-            cameraData.cameraFov = Math.max(50, Math.min(100, parsed.cameraFov || defaults.cameraFov));
-            settings.circleRadius = Math.max(30, Math.min(100, parsed.circleRadius || defaults.circleRadius));
-            cameraData.renderDistance = Math.max(300, Math.min(1000, parsed.renderDistance || defaults.renderDistance));
+            settings.moveSpeed = Math.max(80, Math.min(200, parsed.moveSpeed || defaults.moveSpeed));
+            player.skillSpeed = Math.max(80, Math.min(400, parsed.skillSpeed || defaults.skillSpeed));
+            player.skillRadius = Math.max(1, Math.min(40, parsed.skillRadius || defaults.skillRadius));
+            cameraData.cameraDistance = Math.max(10, Math.min(50, parsed.cameraDistance || defaults.cameraDistance));
+            cameraData.cameraFov = Math.max(30, Math.min(120, parsed.cameraFov || defaults.cameraFov));
+            settings.circleRadius = Math.max(10, Math.min(100, parsed.circleRadius || defaults.circleRadius));
+            cameraData.renderDistance = Math.max(10, Math.min(500, parsed.renderDistance || defaults.renderDistance));
             player.currentMoveSpeed = settings.moveSpeed / 10;
             player.updateSkillRadius();
         } catch (error) {
